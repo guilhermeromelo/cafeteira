@@ -2,9 +2,21 @@
 const int tamanhoPadrao=1;
 const int intensidadePadrao=0;
 const int debounceDelay = 1500;
+const int debounceLongPressedDelay = 3000;
 const int tempoAtualizacaoInfoTela1 = 2000;
 const int tempoAtualizacaoInfoTela4 = 1000;
 const int tempoPularProximaTela = 5000;
+const int tempoTimeoutDesligarResistencia = 40000;
+
+const int pesoCafe50ml = 2;
+const int pesoCafe100ml = 4;
+const int pesoCafe200ml = 6;
+const int pesoCafe300ml = 8;
+
+const int pesoAgua50ml = 60;
+const int pesoAgua100ml = 110;
+const int pesoAgua200ml = 220;
+const int pesoAgua300ml = 330;
 //FIM CONFIG --------------------------------------------------------
 
 
@@ -47,6 +59,7 @@ HX711 escala; //CRIA A VARIÁVEL DE ESCALA DE MEDIÇÃO DA CELULA DE CARGA
 Servo servo; // Criar um Objeto Servo
 float peso = 0.0;
 float temperatura = 0.0;
+float tara = 0;
 //BOTOES-------------------------------
 // 0 - Botao Voltar
 // 1 - Botao Seta Esquerda (<---)
@@ -54,16 +67,20 @@ float temperatura = 0.0;
 // 3 - Botao Ok / Confirma
 // 4 - Botao Emergencia
 const int buttons[5] = {2,3,4,5,6};
-int lastButtonsState[5] = {LOW,LOW,LOW,LOW,LOW};
 bool acaoButtonsState[5] = {false,false,false,false,false};
 int debounceArray[5] = {0,0,0,0,0};
+
+bool acaoButtonTararState = false;
+int debounceButtonTarar = 0;
 //FIM BOTOES --------------------------
 unsigned long loopMillis = 0;
 //CONTROLE
 int tela = 1; //GUARDA TELA ATUAL
 int cursor = 1;
-int tamanho = 0; //0 - 50ml / 1 - 100ml / 2 - 200ml / 3 - 300ml
+int tamanho = 0; //0 - 50ml / 1 - 100ml / 2 - 200ml
+int qtRepeticoesAgua = 0;
 int intensidade = 0; //0 - COMUM / 1 - FORTE
+int etapa = 0;
 //FIM VARIAVEIS GLOBAIS ---------------------------------------------
 
 
@@ -109,7 +126,7 @@ void atualizarTamanhoCafe(){
   if(tamanho == 0) lcd.print(" 50");
   else if(tamanho == 1) lcd.print("100");
   else if(tamanho == 2) lcd.print("200");
-  else if(tamanho == 3) lcd.print("300");
+  //else if(tamanho == 3) lcd.print("300");
 }
 
 void atualizarIntensidade(){
@@ -197,13 +214,13 @@ void deslocarDireitaPeso(float peso){
 }
 
 void esperarTrocaTela(int proximaTela){
-  if((loopMillis == 0 || (millis() - loopMillis) > tempoPularProximaTela) || isButtonPressed(3)){
-    tela = proximaTela;
-    mudarTela();
+  if(timeout(tempoPularProximaTela) || isButtonPressed(3)){
+    mudarTela(proximaTela);
   }
 }
 
-void mudarTela(){
+void mudarTela(int proximaTela){
+  tela = proximaTela;
   if(tela == 1) printHomePage();
   else if (tela == 2) {
     cursor = 1;
@@ -215,7 +232,8 @@ void mudarTela(){
     printTela3();
   } 
   else if (tela == 4) {
-    atualizarValorLoopMillis();
+    tararBalanca();
+    etapa = 0;
     printTela4();
   }
   else if (tela == 5) {
@@ -246,18 +264,36 @@ bool isButtonPressed(int num){
   }
 }
 
+void desejaTararBalanca(){
+  int buttonCurrentState = digitalRead(buttons[0]);
+  if(buttonCurrentState == LOW){
+    if(debounceButtonTarar >= debounceLongPressedDelay && acaoButtonTararState == false){
+      debounceButtonTarar = 0;
+      acaoButtonTararState = true;
+      tararBalanca();
+    } else {
+      debounceButtonTarar += 1;
+      return false;
+    }
+  } else {
+    acaoButtonTararState = false;
+    debounceButtonTarar = 0;
+    return false;
+  }
+}
+
 void monitorarBotoesTela1(){
   if(isButtonPressed(3)){
-    tela = 2;
-    mudarTela();
+    mudarTela(2);
+  } else {
+    desejaTararBalanca();
   }
 }
 
 void monitorarBotoesTela2(){
   if(isButtonPressed(0)){ //BOTAO VOLTAR
     if(cursor == 1){ // O CURSOR ESTA NA PRIMEIRA LINHA
-      tela =  1;
-      mudarTela();
+      mudarTela(1);
     } else { // O CURSOR ESTA NA SEGUNDA OU TERCEIRA LINHA
       cursor--;
       atualizar_cursor_tela2();
@@ -272,7 +308,8 @@ void monitorarBotoesTela2(){
     }
   } else if(isButtonPressed(2)){ //BOTAO DIREITO
     if(cursor == 1){ // O CURSOR ESTA NA PRIMEIRA LINHA - CONFIGURA O TAMANHO DO CAFE
-      if(tamanho < 3) tamanho++;
+      // if(tamanho < 3) tamanho++;
+      if(tamanho < 2) tamanho++;
       atualizarTamanhoCafe();
     } else if(cursor == 2){ // O CURSOR ESTA NA SEGUNDA LINHA - CONFIGURA A INTENSIDADE DO CAFE
       if(intensidade < 1) intensidade++;
@@ -280,8 +317,7 @@ void monitorarBotoesTela2(){
     }
   } else if(isButtonPressed(3)){ //BOTAO OK
     if(cursor == 3){ // O CURSOR ESTA NA TERCEIRA LINHA - INICIAR PREPARO DO CAFE
-      tela = 3;
-      mudarTela();
+      mudarTela(3);
     } else { //  O CURSOR ESTA NA PRIMEIRA OU SEGUNDA LINHA - PULA PARA PROXIMA LINHA
       cursor++;
       atualizar_cursor_tela2();
@@ -295,7 +331,7 @@ void monitorarBotoesTela2(){
 //FUNCOES SENSORES E ATUADORES --------------------------------------
 void atualizarPeso(){
   escala.power_up();
-  peso = escala.get_units();
+  peso = escala.get_units(3) - tara;
   escala.power_down();
 }
 
@@ -324,7 +360,58 @@ void switchBombaAgua(bool ligar){
   else
     digitalWrite(releBombaAgua, LOW);
 }
+
+void tararBalanca(){
+  escala.power_up();
+  tara = escala.get_units(10);
+  escala.power_down();
+}
 //FIM FUNCOES SENSORES E ATUADORES --------------------------------------
+
+//FABRICACAO CAFE ---------------------------------------------------
+void fabricarCafe(){
+  if(etapa == 0){ //INICIAR DESPEJAR CAFE
+    switchServoCafe(true);
+    if(tamanho == 0) qtRepeticoesAgua = 1; //50ml
+    if(tamanho == 1) qtRepeticoesAgua = 2; //100ml
+    if(tamanho == 2) qtRepeticoesAgua = 4; //200ml
+  } else if(etapa == 1){ //COLOCANDO CAFE
+    if(colocouCafeSuficiente){
+      switchServoCafe(false);
+      tararBalanca();
+      switchResistencia(true);
+      etapa++;
+    }
+  } else if(etapa == 2){ //AQUECENDO RESISTENCIA
+    if(temperatura >= 125 || timeout(tempoTimeoutDesligarResistencia)){
+      switchBombaAgua(true);
+      etapa++;
+    }
+  } else if(etapa == 3){ //COLOCANDO AGUA
+    if(colocou50mlAgua){//VOU COLOCAR DE 50 em 50ml
+      switchBombaAgua(false);
+      qtRepeticoesAgua--;
+      etapa = 2;
+      if(qtRepeticoesAgua == 0){
+        switchBombaAgua(false);
+        switchResistencia(false);
+        mudarTela(5);
+      }
+    }
+  }
+}
+bool colocouCafeSuficiente(){
+  //FAZER CONDICAO PESO CAFE  
+}
+
+bool colocou50mlAgua(){
+  //FAZER CONDICAO PESO AGUA
+}
+//FIM FABRICACAO CAFE -----------------------------------------------
+
+bool timeout(int tempoEspera){
+  return (loopMillis == 0 || ((millis() - loopMillis) > tempoEspera));
+}
 
 void atualizarValorLoopMillis(){
   loopMillis = millis();
@@ -350,43 +437,27 @@ void setup() {
   delay(1000); //INTERVALO DE 1 SEGUNDO
   Serial.println(escala.read());   // Aguada até o dispositivo estar pronto
   escala.set_scale(-1810879);     // Substituir o valor encontrado para escala
-  escala.tare();                // O peso é chamado de Tare.
+  escala.tare();
+  escala.power_up();
 
   //Inicializa o LCD e o backlight
   lcd.init();
   lcd.backlight();
-  tela = 1;
-  printHomePage();
+  mudarTela(1);
 }
  
 void loop() {
   if(tela == 4){
-    if((loopMillis == 0 || (millis() - loopMillis) > tempoAtualizacaoInfoTela4)){
+    if(timeout(tempoAtualizacaoInfoTela4)){
       atualizarValorLoopMillis();
       atualizarPeso();
       atualizarTemperatura();
       atualizarInfoTela4();
     }
-
-
-    switchResistencia(true);
-    switchServoCafe(true);
-    delay(6000);
-
-    switchServoCafe(false);
-    switchBombaAgua(true);
-    delay(6000);
-
-    switchResistencia(false);    
-    switchBombaAgua(false);
-
-    delay(2000);
-    tela++;
-    mudarTela();
-
+    //fabricarCafe();
   } else {
     //MONITORAR SENSORES E MOSTRAR NO DISPLAY - DEPENDE DO TEMPO DE ATUALIZAÇÃO
-    if(tela == 1 && (loopMillis == 0 || (millis() - loopMillis) > tempoAtualizacaoInfoTela1)){
+    if(tela == 1 && timeout(tempoAtualizacaoInfoTela1)){
       atualizarValorLoopMillis();
       atualizarPeso();
       atualizarTemperatura();
