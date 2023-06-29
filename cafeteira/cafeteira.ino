@@ -454,7 +454,7 @@ void loop() {
       atualizarTemperatura();
       atualizarInfoTela4();
     }
-    //fabricarCafe();
+    fabricarCafe();
   } else {
     //MONITORAR SENSORES E MOSTRAR NO DISPLAY - DEPENDE DO TEMPO DE ATUALIZAÇÃO
     if(tela == 1 && timeout(tempoAtualizacaoInfoTela1)){
