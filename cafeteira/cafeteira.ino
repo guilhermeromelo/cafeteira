@@ -331,7 +331,7 @@ void monitorarBotoesTela2(){
 //FUNCOES SENSORES E ATUADORES --------------------------------------
 void atualizarPeso(){
   escala.power_up();
-  peso = escala.get_units(3) - tara;
+  peso = escala.get_units(3);// - tara;
   escala.power_down();
 }
 
@@ -342,7 +342,7 @@ void atualizarTemperatura(){
 
 void switchServoCafe(bool ligar){
   if(ligar == true)
-    servo.write(130);
+    servo.write(180);
   else
     servo.write(90);
 }
@@ -362,9 +362,9 @@ void switchBombaAgua(bool ligar){
 }
 
 void tararBalanca(){
-  escala.power_up();
-  tara = escala.get_units(10);
-  escala.power_down();
+  // escala.power_up();
+  // tara = escala.get_units(10);
+  // escala.power_down();
 }
 //FIM FUNCOES SENSORES E ATUADORES --------------------------------------
 
