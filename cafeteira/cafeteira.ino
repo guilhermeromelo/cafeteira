@@ -57,7 +57,9 @@ OneWire ourWire(pinSensorTemp); //CONFIGURA UMA INSTÂNCIA ONEWIRE PARA SE COMUN
 DallasTemperature sensorTemperatura(&ourWire); //BIBLIOTECA DallasTemperature UTILIZA A OneWire
 HX711 escala; //CRIA A VARIÁVEL DE ESCALA DE MEDIÇÃO DA CELULA DE CARGA
 Servo servo; // Criar um Objeto Servo
+int pesosCafe[2] = {2, 4};
 float peso = 0.0;
+float pesoInicial = 0.0;
 float temperatura = 0.0;
 float tara = 0;
 //BOTOES-------------------------------
@@ -221,22 +223,28 @@ void esperarTrocaTela(int proximaTela){
 
 void mudarTela(int proximaTela){
   tela = proximaTela;
-  if(tela == 1) printHomePage();
-  else if (tela == 2) {
+  if(tela == 1) {
+    Serial.println("SEM ESPERA");
+    printHomePage();
+  } else if (tela == 2) {
+    Serial.println("SESCOLHENDO");
     cursor = 1;
     tamanho = tamanhoPadrao;
     intensidade = intensidadePadrao;
     printTela2();
   } else if (tela == 3) {
+    Serial.println("SPREPARANDO");
     atualizarValorLoopMillis();
     printTela3();
   } 
   else if (tela == 4) {
+    Serial.println("SPREPARANDO");
     tararBalanca();
     etapa = 0;
     printTela4();
   }
   else if (tela == 5) {
+    Serial.println("SCAFÉ PRONTO");
     atualizarValorLoopMillis();
     printTela5();
   }
@@ -333,11 +341,17 @@ void atualizarPeso(){
   escala.power_up();
   peso = escala.get_units(3);// - tara;
   escala.power_down();
+
+  Serial.print("P");
+  Serial.println(peso*1000);
 }
 
 void atualizarTemperatura(){
   sensorTemperatura.requestTemperatures();//SOLICITA QUE A FUNÇÃO INFORME A TEMPERATURA DO SENSOR
   temperatura = sensorTemperatura.getTempCByIndex(0);
+
+  Serial.print("T");
+  Serial.println(temperatura);
 }
 
 void switchServoCafe(bool ligar){
@@ -345,20 +359,34 @@ void switchServoCafe(bool ligar){
     servo.write(180);
   else
     servo.write(90);
+    
+    Serial.print("C");
+    Serial.println(ligar);
 }
 
 void switchResistencia(bool ligar){
+  Serial.print("Resistência: ");
+  Serial.println(ligar);
   if(ligar == true)
     digitalWrite(releResistencia, HIGH);
   else
     digitalWrite(releResistencia, LOW);
+    
+    Serial.print("R");
+    Serial.println(ligar);
 }
 
 void switchBombaAgua(bool ligar){
+  Serial.print("Bomba: ");
+  Serial.println(ligar);
   if(ligar == true)
     digitalWrite(releBombaAgua, HIGH);
   else
     digitalWrite(releBombaAgua, LOW);
+
+    
+    Serial.print("A");
+    Serial.println(ligar);
 }
 
 void tararBalanca(){
@@ -375,20 +403,23 @@ void fabricarCafe(){
     if(tamanho == 0) qtRepeticoesAgua = 1; //50ml
     if(tamanho == 1) qtRepeticoesAgua = 2; //100ml
     if(tamanho == 2) qtRepeticoesAgua = 4; //200ml
+    pesoInicial = peso;
+    etapa++;
   } else if(etapa == 1){ //COLOCANDO CAFE
-    if(colocouCafeSuficiente){
+    if(colocouCafeSuficiente()){
       switchServoCafe(false);
       tararBalanca();
       switchResistencia(true);
       etapa++;
     }
   } else if(etapa == 2){ //AQUECENDO RESISTENCIA
-    if(temperatura >= 125 || timeout(tempoTimeoutDesligarResistencia)){
+    if(temperatura >= 125){
+      pesoInicial = peso;
       switchBombaAgua(true);
       etapa++;
     }
   } else if(etapa == 3){ //COLOCANDO AGUA
-    if(colocou50mlAgua){//VOU COLOCAR DE 50 em 50ml
+    if(colocou50mlAgua()){//VOU COLOCAR DE 50 em 50ml
       switchBombaAgua(false);
       qtRepeticoesAgua--;
       etapa = 2;
@@ -401,11 +432,11 @@ void fabricarCafe(){
   }
 }
 bool colocouCafeSuficiente(){
-  //FAZER CONDICAO PESO CAFE  
+  return (peso - pesoInicial) * 1000 >= pesosCafe[intensidade];
 }
 
 bool colocou50mlAgua(){
-  //FAZER CONDICAO PESO AGUA
+  return (peso - pesoInicial) * 1000 >= 20;
 }
 //FIM FABRICACAO CAFE -----------------------------------------------
 
@@ -415,6 +446,21 @@ bool timeout(int tempoEspera){
 
 void atualizarValorLoopMillis(){
   loopMillis = millis();
+}
+
+void escutarPreparoSupervisorio() {
+  if (Serial.available() > 0) {
+    String line = Serial.readStringUntil('\n');
+
+    line.trim();
+
+    if (line.length() == 2) {
+      tamanho = line.charAt(0) - '0';
+      intensidade = line.charAt(1) - '0';
+
+      mudarTela(3);
+    }
+  }
 }
 
 void setup() {
@@ -448,16 +494,17 @@ void setup() {
  
 void loop() {
   if(tela == 4){
+    atualizarPeso();
+    atualizarTemperatura();
     if(timeout(tempoAtualizacaoInfoTela4)){
       atualizarValorLoopMillis();
-      atualizarPeso();
-      atualizarTemperatura();
       atualizarInfoTela4();
     }
     fabricarCafe();
   } else {
     //MONITORAR SENSORES E MOSTRAR NO DISPLAY - DEPENDE DO TEMPO DE ATUALIZAÇÃO
     if(tela == 1 && timeout(tempoAtualizacaoInfoTela1)){
+      escutarPreparoSupervisorio();
       atualizarValorLoopMillis();
       atualizarPeso();
       atualizarTemperatura();
