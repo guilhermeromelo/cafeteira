@@ -4,19 +4,12 @@ const int intensidadePadrao=0;
 const int debounceDelay = 1500;
 const int debounceLongPressedDelay = 3000;
 const int tempoAtualizacaoInfoTela1 = 2000;
-const int tempoAtualizacaoInfoTela4 = 1000;
+const int tempoAtualizacaoInfoTela4 = 4000;
 const int tempoPularProximaTela = 5000;
 const int tempoTimeoutDesligarResistencia = 40000;
 
-const int pesoCafe50ml = 2;
-const int pesoCafe100ml = 4;
-const int pesoCafe200ml = 6;
-const int pesoCafe300ml = 8;
+int pesosCafe[2] = {2, 4};
 
-const int pesoAgua50ml = 60;
-const int pesoAgua100ml = 110;
-const int pesoAgua200ml = 220;
-const int pesoAgua300ml = 330;
 //FIM CONFIG --------------------------------------------------------
 
 
@@ -32,6 +25,8 @@ const int pesoAgua300ml = 330;
 #include "HX711.h"
 //Carrega a biblioteca Servo
 #include "Servo.h"
+//Carrega biblioteca sensor ultrassonico
+#include "Ultrasonic.h"
 //FIM BIBLIOTECAS ---------------------------------------------------
 
 
@@ -47,6 +42,9 @@ const int pesoAgua300ml = 330;
 #define releBombaAgua 9
 //SERVO MOTOR DISPENSER CAFE
 #define pinServoCafe 10
+//sensor ultrassonico
+const int echoPin = 11; //PINO DIGITAL UTILIZADO PELO HC-SR04 ECHO(RECEBE)
+const int trigPin = 12; //PINO DIGITAL UTILIZADO PELO HC-SR04 TRIG(ENVIA)
 //FIM PINAGEM -------------------------------------------------------
 
 
@@ -57,11 +55,14 @@ OneWire ourWire(pinSensorTemp); //CONFIGURA UMA INSTÂNCIA ONEWIRE PARA SE COMUN
 DallasTemperature sensorTemperatura(&ourWire); //BIBLIOTECA DallasTemperature UTILIZA A OneWire
 HX711 escala; //CRIA A VARIÁVEL DE ESCALA DE MEDIÇÃO DA CELULA DE CARGA
 Servo servo; // Criar um Objeto Servo
-int pesosCafe[2] = {2, 4};
 float peso = 0.0;
 float pesoInicial = 0.0;
 float temperatura = 0.0;
+int nivelAgua = 0;
 float tara = 0;
+int multiplicadorTimerResistencia = 0;
+int multiplicadorTimerCafe = 0;
+Ultrasonic ultrasonic(trigPin,echoPin); //INICIALIZANDO OS PINOS DO ARDUINO
 //BOTOES-------------------------------
 // 0 - Botao Voltar
 // 1 - Botao Seta Esquerda (<---)
@@ -76,13 +77,16 @@ bool acaoButtonTararState = false;
 int debounceButtonTarar = 0;
 //FIM BOTOES --------------------------
 unsigned long loopMillis = 0;
+unsigned long loopMillisResistencia = 0;
+unsigned long loopMillisCafe = 0;
 //CONTROLE
 int tela = 1; //GUARDA TELA ATUAL
 int cursor = 1;
 int tamanho = 0; //0 - 50ml / 1 - 100ml / 2 - 200ml
 int qtRepeticoesAgua = 0;
-int intensidade = 0; //0 - COMUM / 1 - FORTE
-int etapa = 0;
+int modalidade = 0; //0 - COMUM / 1 - FORTE
+int etapaCafe = 0;
+int etapaAgua = 0;
 //FIM VARIAVEIS GLOBAIS ---------------------------------------------
 
 
@@ -91,8 +95,8 @@ int etapa = 0;
 //TELA 1 ------------------------------
 void printHomePage(){
   lcd.clear();
-  lcd.setCursor(1, 0);
-  lcd.print("NOME DA CAFETEIRA!");
+  lcd.setCursor(5, 0);
+  lcd.print("NERDPRESSO");
   lcd.setCursor(1, 1);
   lcd.print("PRESSIONE OK PARA");
   lcd.setCursor(1, 2);
@@ -106,6 +110,8 @@ void atualizarInfoTela1(){
   deslocarDireitaPeso(peso*1000);
   lcd.setCursor(1,3);
   deslocarDireitaNumeroInteiro3Caracteres(temperatura);
+  lcd.setCursor(7,3);
+  deslocarDireitaNumeroInteiro3Caracteres(nivelAgua);
 }
 //FIM TELA 1 --------------------------
 //TELA 2 ------------------------------
@@ -116,7 +122,7 @@ void printTela2(){
   lcd.setCursor(0, 1);
   lcd.print(">TAMANHO=<   > ml");
   lcd.setCursor(0, 2);
-  lcd.print(" INTENSIDADE=<     >");
+  lcd.print(" MODALIDADE=<      >");
   lcd.setCursor(0, 3);
   lcd.print(" INICIAR PREPARO <?>");
   atualizarTamanhoCafe();
@@ -127,14 +133,16 @@ void atualizarTamanhoCafe(){
   lcd.setCursor(10, 1);
   if(tamanho == 0) lcd.print(" 50");
   else if(tamanho == 1) lcd.print("100");
-  else if(tamanho == 2) lcd.print("200");
+  else if(tamanho == 2) lcd.print("150");
   //else if(tamanho == 3) lcd.print("300");
 }
 
 void atualizarIntensidade(){
-  lcd.setCursor(14, 2);
-  if(intensidade == 0) lcd.print("COMUM");
-  else if(intensidade == 1) lcd.print("FORTE");
+  lcd.setCursor(13, 2);
+  if(modalidade == 0) lcd.print("C NORM");
+  else if(modalidade == 1) lcd.print("C FORT");
+  else if(modalidade == 2) lcd.print("A QUEN");
+  else if(modalidade == 3) lcd.print("A NATU");
 }
 
 void atualizar_cursor_tela2(){
@@ -230,7 +238,7 @@ void mudarTela(int proximaTela){
     Serial.println("SESCOLHENDO");
     cursor = 1;
     tamanho = tamanhoPadrao;
-    intensidade = intensidadePadrao;
+    modalidade = intensidadePadrao;
     printTela2();
   } else if (tela == 3) {
     Serial.println("SPREPARANDO");
@@ -239,8 +247,8 @@ void mudarTela(int proximaTela){
   } 
   else if (tela == 4) {
     Serial.println("SPREPARANDO");
-    tararBalanca();
-    etapa = 0;
+    etapaCafe = 0;
+    etapaAgua = 0;
     printTela4();
   }
   else if (tela == 5) {
@@ -272,30 +280,30 @@ bool isButtonPressed(int num){
   }
 }
 
-void desejaTararBalanca(){
-  int buttonCurrentState = digitalRead(buttons[0]);
-  if(buttonCurrentState == LOW){
-    if(debounceButtonTarar >= debounceLongPressedDelay && acaoButtonTararState == false){
-      debounceButtonTarar = 0;
-      acaoButtonTararState = true;
-      tararBalanca();
-    } else {
-      debounceButtonTarar += 1;
-      return false;
-    }
-  } else {
-    acaoButtonTararState = false;
-    debounceButtonTarar = 0;
-    return false;
-  }
-}
+// void desejaTararBalanca(){
+//   int buttonCurrentState = digitalRead(buttons[0]);
+//   if(buttonCurrentState == LOW){
+//     if(debounceButtonTarar >= debounceLongPressedDelay && acaoButtonTararState == false){
+//       debounceButtonTarar = 0;
+//       acaoButtonTararState = true;
+//     } else {
+//       debounceButtonTarar += 1;
+//       return false;
+//     }
+//   } else {
+//     acaoButtonTararState = false;
+//     debounceButtonTarar = 0;
+//     return false;
+//   }
+// }
 
 void monitorarBotoesTela1(){
   if(isButtonPressed(3)){
     mudarTela(2);
-  } else {
-    desejaTararBalanca();
   }
+  // } else {
+  //   desejaTararBalanca();
+  // }
 }
 
 void monitorarBotoesTela2(){
@@ -311,7 +319,7 @@ void monitorarBotoesTela2(){
       if(tamanho > 0) tamanho--;
       atualizarTamanhoCafe();
     } else if(cursor ==2){ // O CURSOR ESTA NA SEGUNDA LINHA - CONFIGURA A INTENSIDADE DO CAFE
-      if(intensidade > 0) intensidade--; 
+      if(modalidade > 0) modalidade--; 
       atualizarIntensidade();
     }
   } else if(isButtonPressed(2)){ //BOTAO DIREITO
@@ -320,7 +328,7 @@ void monitorarBotoesTela2(){
       if(tamanho < 2) tamanho++;
       atualizarTamanhoCafe();
     } else if(cursor == 2){ // O CURSOR ESTA NA SEGUNDA LINHA - CONFIGURA A INTENSIDADE DO CAFE
-      if(intensidade < 1) intensidade++;
+      if(modalidade < 3) modalidade++;
       atualizarIntensidade();
     }
   } else if(isButtonPressed(3)){ //BOTAO OK
@@ -342,6 +350,8 @@ void atualizarPeso(){
   peso = escala.get_units(3);// - tara;
   escala.power_down();
 
+  if(peso < 0) peso = 0;
+
   Serial.print("P");
   Serial.println(peso*1000);
 }
@@ -349,9 +359,28 @@ void atualizarPeso(){
 void atualizarTemperatura(){
   sensorTemperatura.requestTemperatures();//SOLICITA QUE A FUNÇÃO INFORME A TEMPERATURA DO SENSOR
   temperatura = sensorTemperatura.getTempCByIndex(0);
+  if(temperatura < 0) temperatura = 0;
+  if(temperatura > 140) temperatura = 140;
 
   Serial.print("T");
   Serial.println(temperatura);
+}
+
+void atualizarNivelAgua(){
+  //12,00 - vazio
+  //2,81 - cheio
+  float cmMsec;
+  long microsec = ultrasonic.timing();
+  cmMsec = ultrasonic.convert(microsec, Ultrasonic::CM);
+  Serial.print("distancia ");
+  Serial.println(cmMsec);
+  nivelAgua = map(cmMsec,4.0,11.00,100,0);
+
+  if(nivelAgua > 100) nivelAgua = 100;
+  if(nivelAgua < 0) nivelAgua = 0;
+
+  Serial.print("N");
+  Serial.println(nivelAgua);
 }
 
 void switchServoCafe(bool ligar){
@@ -388,55 +417,96 @@ void switchBombaAgua(bool ligar){
     Serial.print("A");
     Serial.println(ligar);
 }
-
-void tararBalanca(){
-  // escala.power_up();
-  // tara = escala.get_units(10);
-  // escala.power_down();
-}
 //FIM FUNCOES SENSORES E ATUADORES --------------------------------------
 
 //FABRICACAO CAFE ---------------------------------------------------
 void fabricarCafe(){
-  if(etapa == 0){ //INICIAR DESPEJAR CAFE
+  if(etapaCafe == 0){ //INICIAR DESPEJAR CAFE
     switchServoCafe(true);
+    atualizarValorLoopMillisCafe();
     if(tamanho == 0) qtRepeticoesAgua = 1; //50ml
     if(tamanho == 1) qtRepeticoesAgua = 2; //100ml
-    if(tamanho == 2) qtRepeticoesAgua = 4; //200ml
+    if(tamanho == 2) qtRepeticoesAgua = 3; //150ml
     pesoInicial = peso;
-    etapa++;
-  } else if(etapa == 1){ //COLOCANDO CAFE
-    if(colocouCafeSuficiente()){
-      switchServoCafe(false);
-      tararBalanca();
-      switchResistencia(true);
-      etapa++;
-    }
-  } else if(etapa == 2){ //AQUECENDO RESISTENCIA
-    if(temperatura >= 125){
-      pesoInicial = peso;
-      switchBombaAgua(true);
-      etapa++;
-    }
-  } else if(etapa == 3){ //COLOCANDO AGUA
-    if(colocou50mlAgua()){//VOU COLOCAR DE 50 em 50ml
-      switchBombaAgua(false);
-      qtRepeticoesAgua--;
-      etapa = 2;
-      if(qtRepeticoesAgua == 0){
-        switchBombaAgua(false);
-        switchResistencia(false);
-        mudarTela(5);
+
+    if(modalidade == 0) multiplicadorTimerCafe = 1;
+    if(modalidade == 1) multiplicadorTimerCafe = 2;
+    etapaCafe++;
+  } else if(etapaCafe == 1){ //COLOCANDO CAFE
+    if(timeoutCafe(5000)){
+      if(multiplicadorTimerCafe <= 0){
+          if(colocouCafeSuficiente()){
+            switchServoCafe(false);
+            switchResistencia(true);
+            etapaCafe++;
+            atualizarValorLoopMillisResistencia();
+            carregarMultiplicadorTimerResistencia(3);
+        }
+      } else {
+        multiplicadorTimerCafe--;
+        atualizarValorLoopMillisCafe();
       }
+    }
+  } else if(etapaCafe == 2){ //AQUECENDO RESISTENCIA
+    if(timeoutResistencia(10000) /*temperatura >= 125*/){
+      if(multiplicadorTimerResistencia == 0){
+        pesoInicial = peso;
+        switchBombaAgua(true);
+        etapaCafe++;
+      } else {
+        multiplicadorTimerResistencia--;
+        atualizarValorLoopMillisResistencia();
+      }
+    }
+  } else if(etapaCafe == 3){ //COLOCANDO AGUA
+    if(colocouTodaAgua(qtRepeticoesAgua)){//VOU COLOCAR DE 50 em 50ml
+      switchBombaAgua(false);
+      //qtRepeticoesAgua--;
+      //atualizarValorLoopMillisResistencia();
+      //carregarMultiplicadorTimerResistencia(3);
+      //etapa = 2;
+      // if(qtRepeticoesAgua == 0){
+       
+      // }
+
+      //switchBombaAgua(false);
+      switchResistencia(false);
+      mudarTela(5);
     }
   }
 }
-bool colocouCafeSuficiente(){
-  return (peso - pesoInicial) * 1000 >= pesosCafe[intensidade];
+
+void despejarAgua(){
+  if(etapaAgua == 0){//LIGAR RESISTENCIA
+    if(tamanho == 0) qtRepeticoesAgua = 1; //50ml
+    if(tamanho == 1) qtRepeticoesAgua = 2; //100ml
+    if(tamanho == 2) qtRepeticoesAgua = 3; //150ml
+
+    if(modalidade == 2){//AGUA QUENTE
+      switchResistencia(true);
+      atualizarValorLoopMillisResistencia();
+      carregarMultiplicadorTimerResistencia(3);
+      etapaCafe = 2;
+      etapaAgua++;
+    } else { // AGUA NATU
+      etapaAgua = 2;
+      etapaCafe = 3;
+      pesoInicial = peso;
+      switchBombaAgua(true);
+    }
+  } else if(etapaAgua == 1){//OPCAO SELECIONADA AGUA QUENTE
+    fabricarCafe();
+  } else if(etapaAgua == 2){//OPCAO SELECIONADA AGUA NATURAL
+    fabricarCafe();
+  }
 }
 
-bool colocou50mlAgua(){
-  return (peso - pesoInicial) * 1000 >= 20;
+bool colocouCafeSuficiente(){
+  return (peso - pesoInicial) * 1000 >= pesosCafe[modalidade];
+}
+
+bool colocouTodaAgua(int multiplicador){
+  return (peso - pesoInicial) * 1000 >= (30 * multiplicador);
 }
 //FIM FABRICACAO CAFE -----------------------------------------------
 
@@ -444,8 +514,28 @@ bool timeout(int tempoEspera){
   return (loopMillis == 0 || ((millis() - loopMillis) > tempoEspera));
 }
 
+bool timeoutResistencia(int tempoEspera){
+  return (loopMillisResistencia == 0 || ((millis() - loopMillisResistencia) > tempoEspera));
+}
+
+bool timeoutCafe(int tempoEspera){
+  return (loopMillisCafe == 0 || ((millis() - loopMillisCafe) > tempoEspera));
+}
+
 void atualizarValorLoopMillis(){
   loopMillis = millis();
+}
+
+void atualizarValorLoopMillisResistencia(){
+  loopMillisResistencia = millis();
+}
+
+void atualizarValorLoopMillisCafe(){
+  loopMillisCafe = millis();
+}
+
+void carregarMultiplicadorTimerResistencia (int n){
+  multiplicadorTimerResistencia = n;
 }
 
 void escutarPreparoSupervisorio() {
@@ -456,7 +546,7 @@ void escutarPreparoSupervisorio() {
 
     if (line.length() == 2) {
       tamanho = line.charAt(0) - '0';
-      intensidade = line.charAt(1) - '0';
+      modalidade = line.charAt(1) - '0';
 
       mudarTela(3);
     }
@@ -473,6 +563,8 @@ void setup() {
 
   pinMode(releBombaAgua, OUTPUT);
   pinMode(releResistencia, OUTPUT);
+  pinMode(echoPin, INPUT); //DEFINE O PINO COMO ENTRADA (RECEBE)
+  pinMode(trigPin, OUTPUT); //DEFINE O PINO COMO SAIDA (ENVIA)
 
   //ASSOCIAR PORTA DO SERVO A VARIAVEL SERVO
   servo.attach(pinServoCafe);
@@ -495,12 +587,14 @@ void setup() {
 void loop() {
   if(tela == 4){
     atualizarPeso();
-    atualizarTemperatura();
     if(timeout(tempoAtualizacaoInfoTela4)){
+      atualizarTemperatura();
       atualizarValorLoopMillis();
       atualizarInfoTela4();
     }
-    fabricarCafe();
+    if(modalidade == 0 || modalidade == 1) fabricarCafe();
+    else despejarAgua();
+
   } else {
     //MONITORAR SENSORES E MOSTRAR NO DISPLAY - DEPENDE DO TEMPO DE ATUALIZAÇÃO
     if(tela == 1 && timeout(tempoAtualizacaoInfoTela1)){
@@ -508,6 +602,7 @@ void loop() {
       atualizarValorLoopMillis();
       atualizarPeso();
       atualizarTemperatura();
+      atualizarNivelAgua();
       atualizarInfoTela1();
     }
 
