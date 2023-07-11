@@ -8,7 +8,7 @@ const int tempoAtualizacaoInfoTela4 = 4000;
 const int tempoPularProximaTela = 5000;
 const int tempoTimeoutDesligarResistencia = 40000;
 
-int pesosCafe[2] = {2, 4};
+int pesosCafe[2] = {4, 6};
 
 //FIM CONFIG --------------------------------------------------------
 
@@ -120,7 +120,7 @@ void printTela2(){
   lcd.setCursor(0, 0);
   lcd.print("  ESCOLHA SEU CAFE");
   lcd.setCursor(0, 1);
-  lcd.print(">TAMANHO=<   > ml");
+  lcd.print(">TAMANHO=<      >");
   lcd.setCursor(0, 2);
   lcd.print(" MODALIDADE=<      >");
   lcd.setCursor(0, 3);
@@ -131,9 +131,9 @@ void printTela2(){
 
 void atualizarTamanhoCafe(){
   lcd.setCursor(10, 1);
-  if(tamanho == 0) lcd.print(" 50");
-  else if(tamanho == 1) lcd.print("100");
-  else if(tamanho == 2) lcd.print("150");
+  if(tamanho == 0) lcd.print(" CURTO");
+  else if(tamanho == 1) lcd.print(" MEDIO");
+  else if(tamanho == 2) lcd.print("GRANDE");
   //else if(tamanho == 3) lcd.print("300");
 }
 
@@ -433,7 +433,7 @@ void fabricarCafe(){
     if(modalidade == 1) multiplicadorTimerCafe = 2;
     etapaCafe++;
   } else if(etapaCafe == 1){ //COLOCANDO CAFE
-    if(timeoutCafe(5000)){
+    if(timeoutCafe(8000)){
       if(multiplicadorTimerCafe <= 0){
           if(colocouCafeSuficiente()){
             switchServoCafe(false);
@@ -549,6 +549,27 @@ void escutarPreparoSupervisorio() {
       modalidade = line.charAt(1) - '0';
 
       mudarTela(3);
+    } else if(line.length() == 3){
+      if(line.charAt(1) == 'B'){
+        if(line.charAt(2) == '1') {
+          switchBombaAgua(true);
+        } else {
+          switchBombaAgua(false);
+        }
+
+      } else if(line.charAt(1) == 'M'){
+        if(line.charAt(2) == '1') {
+          switchServoCafe(true);
+        } else {
+          switchServoCafe(false);
+        }
+      } else if(line.charAt(1) == 'R'){
+        if(line.charAt(2) == '1') {
+          switchResistencia(true);
+        } else {
+          switchResistencia(false);
+        }
+      }
     }
   }
 }
